@@ -1,22 +1,26 @@
-# Codemagic CI for building Geode (Windows loader) targeting GD 2.209.
+# Codemagic CI for building Geode (Windows loader) targeting GD 2.2091.
 #
 # Build strategy (no changes to Geode sources needed):
+#   - The upstream v6 branch of geode-sdk/geode is the tree with native
+#     GD 2.2091 support (updated cocos headers etc.). Official main (5.11.x)
+#     only supports 2.2081 natively and runs on 2.209x in forward-compat.
+#     We clone and build upstream v6; this repository only carries the CI.
 #   - Runs on mac_mini_m2 (free-tier instance) and cross-compiles for Windows
 #     using LLVM clang-cl + lld-link, exactly like Geode's own official CI, which
 #     cross-compiles Windows builds on Linux. The Windows SDK / MSVC CRT headers
 #     and libs are downloaded/normalized locally by `xwin` (brew package).
 #   - Target GD version is provided purely through CMake variables:
-#       GEODE_GD_VERSION=1792203143   -> matches GeometryDash.exe PE TimeDateStamp
-#                                        of the GD 2.209 build (2026-10-17 02:12 UTC),
-#                                        so the loader recognizes the game and
-#                                        exits forward-compat mode.
-#       GEODE_COMP_GD_VERSION=22090   -> numeric version gates (2.209)
-#       GEODE_BINDINGS_PATH=<pinned bindings>/bindings/2.209 -> 2.209 address dataset
+#       GEODE_GD_VERSION=2.2091   -> the running exe has PE TimeDateStamp
+#                                    1792203143 (2026-10-17 02:12 UTC), which
+#                                    maps to "2.2091", so the loader recognizes
+#                                    the game and exits forward-compat mode.
+#       GEODE_COMP_GD_VERSION=22091 -> numeric version gates (2.2091)
+#       GEODE_BINDINGS_PATH=<pinned bindings>/bindings/2.2091 -> 2.2091 dataset
 #   - Bindings are pinned to a known-good commit of geode-sdk/bindings main.
 
 workflows:
-  win-gd-209:
-    name: Geode Windows for GD 2.209
+  win-gd-2091:
+    name: Geode Windows for GD 2.2091
     instance_type: mac_mini_m2
     max_build_duration: 120
     environment:
@@ -24,11 +28,11 @@ workflows:
       vars:
         XWIN_SDK: "10.0.26100"
         XWIN_ARCH: "x86_64"
-        # pinned commit of geode-sdk/bindings (main), contains bindings/2.209
-        BINDINGS_REF: "5a28d381873e58bc08b8de3f7d73ec7f9444cd06"
-        # GD 2.209 build (PE TimeDateStamp), numeric and its comparable form
-        GEO_VER_TARGET: "1792203143"
-        GEO_COMP_TARGET: "22090"
+        # pinned commit of geode-sdk/bindings (main), contains bindings/2.2091
+        BINDINGS_REF: "619c7de3cac2d14e57ca67ab7820057d079ddca6"
+        # GD 2.2091: dotted version (maps to PE TimeDateStamp 1792203143)
+        GEO_VER_TARGET: "2.2091"
+        GEO_COMP_TARGET: "22091"
     cache:
       cache_paths:
         - ~/.cpm-cache
@@ -68,13 +72,24 @@ workflows:
           echo "--- splat layout ---"
           ls "$HOME/.xwin-cache/splat"
 
+      - name: Clone upstream geode v6 (native 2.209 support tree)
+        script: |
+          set -euo pipefail
+          # geode-sdk/geode main (5.11.x) only supports GD 2.2081 natively and
+          # runs on 2.209 in forward-compat mode. The v6 branch is the WIP tree
+          # with 2.209/2.2091 support (updated cocos headers, new dispatchers,
+          # timestamps). We build THAT tree, not the repository Codemagic
+          # fetched (this repo only carries codemagic.yaml).
+          git clone --depth 1 -b v6 https://github.com/geode-sdk/geode "$CM_BUILD_DIR/upstream-v6"
+          echo "v6 tree at: $(git -C "$CM_BUILD_DIR/upstream-v6" rev-parse HEAD)"
+
       - name: Clone clang-msvc-sdk toolchain and pinned bindings
         script: |
           set -euo pipefail
           cd "$CM_BUILD_DIR"
           git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
           git clone --depth 1 https://github.com/geode-sdk/bindings bindings-repo
-          (cd bindings-repo && git fetch --depth 1 origin "$BINDINGS_REF" && git checkout --detach "$BINDINGS_REF")
+          (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
           echo "bindings pinned at: $(git -C bindings-repo rev-parse HEAD)"
 
       - name: Install Geode CLI (v3.9.0, macOS)
@@ -87,7 +102,7 @@ workflows:
           chmod +x "$HOME/bin/geode"
           "$HOME/bin/geode" --version || echo "geode CLI: (version unavailable)"
 
-      - name: Configure + build geode-loader (Windows x64, GD 2.209)
+      - name: Configure + build geode-loader (Windows x64, GD 2.2091)
         script: |
           set -euo pipefail
           export PATH="$HOME/bin:$(brew --prefix lld)/bin:$(brew --prefix llvm)/bin:$PATH"
@@ -95,20 +110,20 @@ workflows:
           # Use the pinned bindings clone (checked out at $BINDINGS_REF above)
           # instead of letting CPM fetch 'main'. Env var is read by geode's
           # top-level CMakeLists (lines 72-95).
-          export GEODE_BINDINGS_REPO_PATH="$PWD/bindings-repo"
+          export GEODE_BINDINGS_REPO_PATH="$CM_BUILD_DIR/bindings-repo"
           mkdir -p "$CPM_SOURCE_CACHE"
-          cd "$CM_BUILD_DIR"
+          cd "$CM_BUILD_DIR/upstream-v6"
 
           echo "== configure =="
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DCMAKE_TOOLCHAIN_FILE="$PWD/clang-msvc-sdk/clang-cl-msvc.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$CM_BUILD_DIR/clang-msvc-sdk/clang-cl-msvc.cmake" \
             -DSPLAT_DIR="$HOME/.xwin-cache/splat" \
             -DHOST_ARCH="$XWIN_ARCH" \
             -DGEODE_GD_VERSION="$GEO_VER_TARGET" \
             -DGEODE_COMP_GD_VERSION="$GEO_COMP_TARGET" \
-            -DGEODE_BINDINGS_PATH="$PWD/bindings-repo/bindings/2.209" \
+            -DGEODE_BINDINGS_PATH="$CM_BUILD_DIR/bindings-repo/bindings/2.2091" \
             -DGEODE_UNITY_BUILD=ON \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
             -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja"
@@ -119,15 +134,15 @@ workflows:
           rm -rf bin/nightly/resources/.geode_cache
 
           echo "== output =="
-          find "$CM_BUILD_DIR/bin/nightly" -maxdepth 2 | sort
+          find "$CM_BUILD_DIR/upstream-v6/bin/nightly" -maxdepth 2 | sort
 
     artifacts:
-      - bin/nightly/Geode.dll
-      - bin/nightly/Geode.lib
-      - bin/nightly/Geode.pdb
-      - bin/nightly/XInput1_4.dll
-      - bin/nightly/GeodeUpdater.exe
-      - bin/nightly/resources/**/*
+      - upstream-v6/bin/nightly/Geode.dll
+      - upstream-v6/bin/nightly/Geode.lib
+      - upstream-v6/bin/nightly/Geode.pdb
+      - upstream-v6/bin/nightly/XInput1_4.dll
+      - upstream-v6/bin/nightly/GeodeUpdater.exe
+      - upstream-v6/bin/nightly/resources/**/*
     publishing:
       email:
         recipients:

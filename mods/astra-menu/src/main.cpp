@@ -23,8 +23,12 @@
 //     forwards touches inside the panel to the CCMenu (buttons) by returning
 //     false there.
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 
 #include <Geode/Geode.hpp>
@@ -76,6 +80,9 @@ PlayLayer*& activePL() {
     static PlayLayer* s_pl = nullptr;
     return s_pl;
 }
+
+// Defined after the overlay class; forward declared for its callbacks.
+void toggleOverlay();
 
 // Shared button anchor helper. `owner` is the layer that receives the menu and
 // acts as the button target (each modify class wires its own member callback).
@@ -201,7 +208,7 @@ protected:
     // outside the panel; inside the panel touches are forwarded to the CCMenu
     // so buttons keep working and empty panel spots swallow nothing.
     void registerWithTouchDispatcher() override {
-        cocos2d::CCTouchDispatcher::sharedDispatcher()
+        cocos2d::CCTouchDispatcher::get()
             ->addTargetedDelegate(this, -130, true);
     }
 
@@ -279,13 +286,13 @@ namespace astra {
 void toggleOverlay() {
     auto scene = cocos2d::CCDirector::get()->getRunningScene();
     if (!scene) return;
-    if (auto old = scene->getChildByID("sk0v.astra-menu/overlay"_s)) {
+    if (auto old = scene->getChildByID(std::string("sk0v.astra-menu/overlay"))) {
         old->removeFromParent();
         return;
     }
     auto overlay = AstraOverlay::create();
     if (!overlay) return;
-    overlay->setID("sk0v.astra-menu/overlay"_s);
+    overlay->setID(std::string("sk0v.astra-menu/overlay"));
     scene->addChild(overlay, 9999);
 }
 

@@ -147,3 +147,128 @@ workflows:
       email:
         recipients:
           - artemkakartasev@gmail.com
+
+  # ---------------------------------------------------------------------------
+  # Pilot: build a third-party Geode mod for GD 2.2091 Windows.
+  #
+  # Proof-of-concept that mods can be rebuilt against the v6 (2.2091) SDK in
+  # this cross-compile pipeline. Target: FireMario211/Golden-Best
+  # (open source, no mod dependencies, single translation unit).
+  #
+  # No changes to Geode SDK sources; no changes to the mod's C++ sources.
+  # Only mod.json's Windows gd target is rewritten to 2.2091 because the
+  # binary is genuinely rebuilt against the 2.2091 bindings/SDK in this job.
+  # For personal use only - nothing is published to the Geode index.
+  # ---------------------------------------------------------------------------
+  win-mod-goldenbest-2091:
+    name: GoldenBest Windows for GD 2.2091 (v6 pilot)
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: 26.6
+      vars:
+        XWIN_SDK: "10.0.26100"
+        XWIN_ARCH: "x86_64"
+        BINDINGS_REF: "619c7de3cac2d14e57ca67ab7820057d079ddca6"
+        GEO_VER_TARGET: "2.2091"
+        GEO_COMP_TARGET: "22091"
+        # pinned trees for reproducible mod builds
+        GEODE_V6_REF: "777c2b6"
+        MOD_REPO: "https://github.com/FireMario211/Golden-Best"
+        MOD_REF: "04671b99f9e02264b588297c8ccf6bfd6fbaf08a"
+    cache:
+      cache_paths:
+        - ~/.cpm-cache
+        - ~/.xwin-cache
+    scripts:
+      - name: Install build tools (xwin, ninja, cmake, llvm, lld)
+        script: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          for f in xwin ninja cmake llvm lld; do
+            if ! command -v "$f" >/dev/null 2>&1; then
+              brew install "$f"
+            fi
+          done
+          export PATH="$(brew --prefix lld)/bin:$(brew --prefix llvm)/bin:$PATH"
+          echo "LLVM: $(clang-cl --version | head -1)"
+
+      - name: Fetch Windows SDK + MSVC CRT via xwin (splat)
+        script: |
+          set -euo pipefail
+          mkdir -p "$HOME/.xwin-cache"
+          xwin --cache-dir "$HOME/.xwin-cache" --arch "$XWIN_ARCH" --sdk-version "$XWIN_SDK" \
+            --accept-license splat --include-debug-libs
+
+      - name: Clone pinned trees (geode v6, toolchain, bindings, mod)
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          git clone --depth 1 https://github.com/geode-sdk/geode upstream-v6
+          (cd upstream-v6 && git fetch --depth 1 origin "$GEODE_V6_REF" && git checkout --detach FETCH_HEAD)
+          git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
+          git clone --depth 1 https://github.com/geode-sdk/bindings bindings-repo
+          (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
+          echo "geode v6 pinned at: $(git -C upstream-v6 rev-parse HEAD)"
+          git clone --depth 1 "$MOD_REPO" goldenbest-mod
+          (cd goldenbest-mod && git fetch --depth 1 origin "$MOD_REF" && git checkout --detach FETCH_HEAD)
+          echo "mod pinned at: $(git -C goldenbest-mod rev-parse HEAD)"
+
+      - name: Retarget mod metadata to GD 2.2091 (Windows only)
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR/goldenbest-mod"
+          # The binary is rebuilt against 2.2091 bindings in this job, so the
+          # Windows game-version declaration becomes 2.2091.
+          sed -i 's/"win": "2.2081"/"win": "2.2091"/' mod.json
+          echo "--- mod.json gd after retarget ---"
+          grep -A5 '"gd"' mod.json
+
+      - name: Install Geode CLI (v3.9.0, macOS)
+        script: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -L --fail -o /tmp/geode-cli.zip \
+            "https://github.com/geode-sdk/cli/releases/download/v3.9.0/geode-cli-v3.9.0-mac.zip"
+          unzip -o /tmp/geode-cli.zip -d "$HOME/bin"
+          chmod +x "$HOME/bin/geode"
+          "$HOME/bin/geode" --version || echo "geode CLI: (version unavailable)"
+
+      - name: Configure + build mod for Windows x64 (GD 2.2091)
+        script: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$(brew --prefix lld)/bin:$(brew --prefix llvm)/bin:$PATH"
+          export CPM_SOURCE_CACHE="$HOME/.cpm-cache"
+          # The mod consumes the SDK in-tree (add_subdirectory($ENV{GEODE_SDK})).
+          export GEODE_SDK="$CM_BUILD_DIR/upstream-v6"
+          # Pinned bindings, read by geode's top-level CMakeLists.
+          export GEODE_BINDINGS_REPO_PATH="$CM_BUILD_DIR/bindings-repo"
+          mkdir -p "$CPM_SOURCE_CACHE"
+          cd "$CM_BUILD_DIR/goldenbest-mod"
+
+          echo "== configure =="
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_TOOLCHAIN_FILE="$CM_BUILD_DIR/clang-msvc-sdk/clang-cl-msvc.cmake" \
+            -DSPLAT_DIR="$HOME/.xwin-cache/splat" \
+            -DHOST_ARCH="$XWIN_ARCH" \
+            -DGEODE_GD_VERSION="$GEO_VER_TARGET" \
+            -DGEODE_COMP_GD_VERSION="$GEO_COMP_TARGET" \
+            -DGEODE_BINDINGS_PATH="$CM_BUILD_DIR/bindings-repo/bindings/2.2091" \
+            -DGEODE_UNITY_BUILD=ON \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja"
+
+          echo "== build =="
+          cmake --build build --config RelWithDebInfo --parallel
+
+          echo "== output .geode =="
+          find "$CM_BUILD_DIR/goldenbest-mod/build" -name "*.geode" -maxdepth 2 -exec ls -la {} \;
+
+    artifacts:
+      - goldenbest-mod/build/*.geode
+    publishing:
+      email:
+        recipients:
+          - artemkakartasev@gmail.com

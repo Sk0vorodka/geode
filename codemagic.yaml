@@ -88,7 +88,7 @@ workflows:
           set -euo pipefail
           cd "$CM_BUILD_DIR"
           git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
-          git clone --depth 1 https://github.com/geode-sdk/bindings bindings-repo
+          git clone https://github.com/geode-sdk/bindings bindings-repo
           (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
           echo "bindings pinned at: $(git -C bindings-repo rev-parse HEAD)"
 
@@ -210,7 +210,7 @@ workflows:
           echo "geode v6 tip: $current (pinned: $GEODE_V6_REF)"
           case "$current" in "$GEODE_V6_REF"*) ;; *) echo "NOTE: geode v6 moved past pin - continuing with current tip." ;; esac
           git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
-          git clone --depth 1 https://github.com/geode-sdk/bindings bindings-repo
+          git clone https://github.com/geode-sdk/bindings bindings-repo
           (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
           echo "bindings pinned at: $(git -C bindings-repo rev-parse HEAD)"
           git clone --depth 1 "$MOD_REPO" goldenbest-mod

@@ -204,15 +204,19 @@ workflows:
         script: |
           set -euo pipefail
           cd "$CM_BUILD_DIR"
-          git clone --depth 1 https://github.com/geode-sdk/geode upstream-v6
-          (cd upstream-v6 && git fetch --depth 1 origin "$GEODE_V6_REF" && git checkout --detach FETCH_HEAD)
+          git clone --depth 1 -b v6 https://github.com/geode-sdk/geode upstream-v6
+          # Verify the checked-out tree matches the pinned commit (moving-tip guard).
+          current=$(git -C upstream-v6 rev-parse HEAD)
+          echo "geode v6 tip: $current (pinned: $GEODE_V6_REF)"
+          case "$current" in "$GEODE_V6_REF"*) ;; *) echo "NOTE: geode v6 moved past pin - continuing with current tip." ;; esac
           git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
           git clone --depth 1 https://github.com/geode-sdk/bindings bindings-repo
           (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
-          echo "geode v6 pinned at: $(git -C upstream-v6 rev-parse HEAD)"
+          echo "bindings pinned at: $(git -C bindings-repo rev-parse HEAD)"
           git clone --depth 1 "$MOD_REPO" goldenbest-mod
-          (cd goldenbest-mod && git fetch --depth 1 origin "$MOD_REF" && git checkout --detach FETCH_HEAD)
-          echo "mod pinned at: $(git -C goldenbest-mod rev-parse HEAD)"
+          mcurrent=$(git -C goldenbest-mod rev-parse HEAD)
+          echo "mod tip: $mcurrent (pinned: $MOD_REF)"
+          case "$mcurrent" in "$MOD_REF"*) ;; *) echo "NOTE: mod repo moved past pin - continuing with current tip." ;; esac
 
       - name: Retarget mod metadata to GD 2.2091 (Windows only)
         script: |

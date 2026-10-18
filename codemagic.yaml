@@ -272,6 +272,7 @@ workflows:
             -DGEODE_DONT_INSTALL_MODS=ON \
             -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
             -DFMT_USE_CMAKE_MODULES=OFF \
+            -DFMT_MODULE=OFF \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
             -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja" || {
             echo "== DIAGNOSTIC: configure/generate failed =="

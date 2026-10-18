@@ -273,7 +273,14 @@ workflows:
             -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
             -DFMT_USE_CMAKE_MODULES=OFF \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
-            -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja"
+            -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja" || {
+            echo "== DIAGNOSTIC: configure/generate failed =="
+            echo "-- CMakeCache fmt/scan entries:"
+            grep -n "FMT_MODULE\|FMT_USE_CMAKE_MODULES\|SCAN_FOR_MODULES" build/CMakeCache.txt | head -40
+            echo "-- fmt option/module lines in cached source:"
+            grep -n "FMT_MODULE\|FMT_USE_CMAKE_MODULES\|add_module_library" "$CPM_SOURCE_CACHE/fmt/73a7/CMakeLists.txt" | head -10
+            exit 1
+          }
 
           echo "== build =="
           cmake --build build --config RelWithDebInfo --parallel

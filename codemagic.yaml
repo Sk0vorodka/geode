@@ -228,11 +228,12 @@ workflows:
         script: |
           set -euo pipefail
           cd "$CM_BUILD_DIR/goldenbest-mod"
-          # The binary is rebuilt against 2.2091 bindings in this job, so the
-          # Windows game-version declaration becomes 2.2091.
-          sed -i '' -e 's/"win": "2.2081"/"win": "2.2091"/' mod.json 2>/dev/null || perl -pi -e 's/"win":\s*"2\.2081"/"win": "2.2091"/' mod.json
-          echo "--- mod.json gd after retarget ---"
-          grep -A5 '"gd"' mod.json
+          # The mod is genuinely rebuilt against the v6 (5.11.2 self-version)
+          # SDK with 2.2091 bindings in this job, so these two declarations
+          # change accordingly. BSD sed needs -i ''; use perl for portability.
+          perl -pi -e 's/"win":\s*"2\.2081"/"win": "2.2091"/; s/"geode":\s*"[^"]*"/"geode": "5.11.2"/' mod.json
+          echo "--- mod.json gd/geode after retarget ---"
+          grep -E '"geode"|"win"' mod.json
 
       - name: Install Geode CLI (v3.9.0, macOS)
         script: |

@@ -209,6 +209,12 @@ workflows:
           current=$(git -C upstream-v6 rev-parse HEAD)
           echo "geode v6 tip: $current (pinned: $GEODE_V6_REF)"
           case "$current" in "$GEODE_V6_REF"*) ;; *) echo "NOTE: geode v6 moved past pin - continuing with current tip." ;; esac
+          # Provide the pre-built v6 loader import lib (built from the same
+          # pinned commit in the win-gd-2091 workflow) so the SDK links the
+          # mod against it instead of failing with "No valid loader binary".
+          mkdir -p upstream-v6/bin/nightly
+          cp "$CM_BUILD_DIR/pilot-sdk-bin/Geode.lib" upstream-v6/bin/nightly/Geode.lib
+          ls -la upstream-v6/bin/nightly/
           git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
           git clone https://github.com/geode-sdk/bindings bindings-repo
           (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
@@ -261,6 +267,8 @@ workflows:
             -DGEODE_COMP_GD_VERSION="$GEO_COMP_TARGET" \
             -DGEODE_BINDINGS_PATH="$CM_BUILD_DIR/bindings-repo/bindings/2.2091" \
             -DGEODE_UNITY_BUILD=ON \
+            -DGEODE_TARGET_PLATFORM=Win64 \
+            -DGEODE_DONT_INSTALL_MODS=ON \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
             -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja"
 

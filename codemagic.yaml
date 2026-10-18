@@ -295,3 +295,118 @@ workflows:
       email:
         recipients:
           - artemkakartasev@gmail.com
+
+  # ---------------------------------------------------------------------------
+  # Astra Menu - personal utility menu mod for GD 2.2091.
+  # Sources live in this repository under mods/astra-menu (personal use only,
+  # not published to the Geode index). Built against the pinned v6 SDK and the
+  # committed prebuilt Geode.lib (same ABI as the installed loader).
+  # ---------------------------------------------------------------------------
+  win-mod-astra-2091:
+    name: Astra Menu (win, GD 2.2091)
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: 26.6
+      vars:
+        XWIN_SDK: "10.0.26100"
+        XWIN_ARCH: "x86_64"
+        BINDINGS_REF: "619c7de3cac2d14e57ca67ab7820057d079ddca6"
+        GEO_VER_TARGET: "2.2091"
+        GEO_COMP_TARGET: "22091"
+        GEODE_V6_REF: "777c2b6"
+    cache:
+      cache_paths:
+        - ~/.cpm-cache
+        - ~/.xwin-cache
+    scripts:
+      - name: Install build tools (xwin, ninja, cmake, llvm, lld)
+        script: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          for f in xwin ninja cmake llvm lld; do
+            if ! command -v "$f" >/dev/null 2>&1; then
+              brew install "$f"
+            fi
+          done
+          export PATH="$(brew --prefix lld)/bin:$(brew --prefix llvm)/bin:$PATH"
+          echo "LLVM: $(clang-cl --version | head -1)"
+
+      - name: Fetch Windows SDK + MSVC CRT via xwin (splat)
+        script: |
+          set -euo pipefail
+          mkdir -p "$HOME/.xwin-cache"
+          xwin --cache-dir "$HOME/.xwin-cache" --arch "$XWIN_ARCH" --sdk-version "$XWIN_SDK" \
+            --accept-license splat --include-debug-libs
+
+      - name: Clone pinned trees (geode v6, toolchain) + drop in prebuilt Geode.lib
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          git clone --depth 1 -b v6 https://github.com/geode-sdk/geode upstream-v6
+          current=$(git -C upstream-v6 rev-parse HEAD)
+          echo "geode v6 tip: $current (pinned: $GEODE_V6_REF)"
+          case "$current" in "$GEODE_V6_REF"*) ;; *) echo "ERROR: v6 tip moved past pin - update Geode.lib + pin in lockstep"; exit 1 ;; esac
+          git clone --depth 1 https://github.com/geode-sdk/clang-msvc-sdk clang-msvc-sdk
+          git clone https://github.com/geode-sdk/bindings bindings-repo
+          (cd bindings-repo && git checkout --detach "$BINDINGS_REF")
+          echo "bindings pinned at: $(git -C bindings-repo rev-parse HEAD)"
+          mkdir -p upstream-v6/bin/nightly
+          cp "$CM_BUILD_DIR/pilot-sdk-bin/Geode.lib" upstream-v6/bin/nightly/Geode.lib
+          ls -la upstream-v6/bin/nightly/
+
+      - name: Install Geode CLI (v3.9.0, macOS)
+        script: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -L --fail -o /tmp/geode-cli.zip \
+            "https://github.com/geode-sdk/cli/releases/download/v3.9.0/geode-cli-v3.9.0-mac.zip"
+          unzip -o /tmp/geode-cli.zip -d "$HOME/bin"
+          chmod +x "$HOME/bin/geode"
+          "$HOME/bin/geode" --version || echo "geode CLI: (version unavailable)"
+
+      - name: Configure + build Astra Menu (Windows x64, GD 2.2091)
+        script: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$(brew --prefix lld)/bin:$(brew --prefix llvm)/bin:$PATH"
+          export CPM_SOURCE_CACHE="$HOME/.cpm-cache"
+          export GEODE_SDK="$CM_BUILD_DIR/upstream-v6"
+          export GEODE_BINDINGS_REPO_PATH="$CM_BUILD_DIR/bindings-repo"
+          mkdir -p "$CPM_SOURCE_CACHE"
+          cd "$CM_BUILD_DIR/mods/astra-menu"
+
+          echo "== configure =="
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_TOOLCHAIN_FILE="$CM_BUILD_DIR/clang-msvc-sdk/clang-cl-msvc.cmake" \
+            -DSPLAT_DIR="$HOME/.xwin-cache/splat" \
+            -DHOST_ARCH="$XWIN_ARCH" \
+            -DGEODE_GD_VERSION="$GEO_VER_TARGET" \
+            -DGEODE_COMP_GD_VERSION="$GEO_COMP_TARGET" \
+            -DGEODE_BINDINGS_PATH="$CM_BUILD_DIR/bindings-repo/bindings/2.2091" \
+            -DGEODE_UNITY_BUILD=ON \
+            -DGEODE_TARGET_PLATFORM=Win64 \
+            -DGEODE_DONT_INSTALL_MODS=ON \
+            -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
+            -DFMT_MODULE=OFF \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DGEODE_CODEGEN_CMAKE_ARGS="-DCMAKE_C_COMPILER=clang;-DCMAKE_CXX_COMPILER=clang++;-G Ninja" || {
+            echo "== DIAGNOSTIC: configure/generate failed =="
+            echo "-- CMakeCache fmt/scan entries:"
+            grep -n "FMT_MODULE\|FMT_USE_CMAKE_MODULES\|SCAN_FOR_MODULES" build/CMakeCache.txt | head -40
+            exit 1
+          }
+
+          echo "== build =="
+          cmake --build build --config RelWithDebInfo --parallel
+
+          echo "== output .geode =="
+          find "$CM_BUILD_DIR/mods/astra-menu/build" -maxdepth 2 -name "*.geode" -exec ls -la {} \;
+
+    artifacts:
+      - mods/astra-menu/build/*.geode
+    publishing:
+      email:
+        recipients:
+          - artemkakartasev@gmail.com

@@ -1,0 +1,16 @@
+{
+  "geode": "5.11.2",
+  "gd": {
+    "win": "2.2091",
+    "mac": "2.2091",
+    "ios": "2.2091",
+    "android": "2.2091"
+  },
+  "id": "sk0v.astra-menu",
+  "name": "Astra Menu",
+  "version": "v0.1.0",
+  "developer": "Sk0vorodka",
+  "description": "Personal utility menu for GD 2.2091. Private build - not distributed on the Geode index.",
+  "tags": ["gameplay", "utility", "offline"],
+  "repository": "https://github.com/Sk0vorodka/geode"
+}

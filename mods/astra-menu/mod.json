@@ -8,9 +8,9 @@
   },
   "id": "sk0v.astra-menu",
   "name": "Astra Menu",
-  "version": "v0.1.0",
+  "version": "v0.2.0",
   "developer": "Sk0vorodka",
-  "description": "Personal utility menu for GD 2.2091. Private build - not distributed on the Geode index.",
+  "description": "Personal utility menu (Tab) for GD 2.2091. Private build - not distributed on the Geode index.",
   "tags": ["gameplay", "utility", "offline"],
   "repository": "https://github.com/Sk0vorodka/geode"
 }

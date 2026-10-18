@@ -1,26 +1,33 @@
 // Astra Menu - personal utility menu for GD 2.2091 (Geode v6 SDK).
 // Private build for personal use only; not published to the Geode index.
 //
-// v0.1.0 features:
-//   - floating "Astra" button on the main menu and the pause screen
-//   - Noclip toggle (cancels player destruction)
-//   - Speed cycling presets (x0.25 .. x3) via GJBaseGameLayer::update dt scale
-//   - state persisted through Geode saved values
+// v0.2.0:
+//   - full-screen overlay menu toggled with TAB (main menu, levels, pause)
+//   - Noclip toggle, Speed cycling, Practice Mode toggle, Instant Restart
+//   - plain CCLayerColor overlay: NO FLAlertLayer, NO keyboard delegate
+//     registration, no Popup lifetimes (v0.1's FLAlertLayer popup was the
+//     source of a keyboard-delegate use-after-free crash on 2.2091).
 //
-// API notes verified against Geode v6 + 2.2091 bindings:
-//   - geode::Popup is a plain class here: subclasses implement bool init() and
-//     call Popup::init(width, height); buttons go into m_buttonMenu, labels
-//     into m_mainLayer (see loader's own UITest popup).
-//   - PlayLayer::update does not exist in 2.2091 (only postUpdate), the frame
-//     entry point is GJBaseGameLayer::update - PlayLayer inherits it.
-//   - PauseLayer::init(bool) has no win address in bindings (inline), so the
-//     pause hook is customSetup() with direct button injection (the button
-//     menu node is ours and does not depend on base-class UI).
-//   - Pause state uses PlayLayer's bound m_isPaused field (accessible inside
-//     modify classes) plus a global shadow flag reset on level enter/exit.
+// API notes verified against Geode v6 headers + the 2.2091 bindings dataset:
+//   - PlayLayer::update does not exist in 2.2091; the frame entry point is
+//     GJBaseGameLayer::update (Game classes have win addresses in the
+//     dataset; plain cocos calls link through the cocos2d.dll import lib).
+//   - CCKeyboardDispatcher::dispatchKeyboardMSG is not win-hookable, so TAB
+//     is detected via GetAsyncKeyState polling inside the update hook plus
+//     MenuLayer::keyDown on the main menu.
+//   - PauseLayer::init(bool) has no win address (inline); the pause hook is
+//     customSetup() with direct button injection.
+//   - Pause state uses PlayLayer's bound m_isPaused field plus a shadow flag
+//     reset on level enter/exit; overlay touch handling mirrors FLAlertLayer:
+//     targeted delegate registered early, swallows touches outside the panel,
+//     forwards touches inside the panel to the CCMenu (buttons) by returning
+//     false there.
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
 
 #include <Geode/Geode.hpp>
-#include <Geode/ui/Popup.hpp>
 #include <Geode/ui/Layout.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
@@ -64,115 +71,10 @@ bool& levelPaused() {
     return s_paused;
 }
 
-} // namespace astra
-
-// Status popup ----------------------------------------------------------------
-
-class AstraPopup : public Popup {
-protected:
-    ButtonSprite* m_noclipBtnSpr = nullptr;
-    ButtonSprite* m_speedBtnSpr = nullptr;
-    CCLabelBMFont* m_hintLabel = nullptr;
-
-    static const char* noclipText() {
-        return astra::noclipOn() ? "Noclip: ON" : "Noclip: OFF";
-    }
-
-    bool init() override {
-        if (!Popup::init(290.f, 200.f, "GJ_square05.png")) return false;
-
-        this->setTitle("Astra Menu");
-
-        // Noclip toggle -------------------------------------------------------
-        m_noclipBtnSpr = ButtonSprite::create(
-            noclipText(), "bigFont.fnt", "GJ_button_05.png", 0.9f
-        );
-        m_noclipBtnSpr->setScale(0.9f);
-        auto noclipBtn = CCMenuItemSpriteExtra::create(
-            m_noclipBtnSpr, this, menu_selector(AstraPopup::onNoclip)
-        );
-        m_buttonMenu->addChildAtPosition(noclipBtn, Anchor::Center, ccp(0.f, 35.f));
-
-        // Speed cycler --------------------------------------------------------
-        m_speedBtnSpr = ButtonSprite::create(
-            fmt::format("Speed: x{}", astra::speedMult()).c_str(),
-            "bigFont.fnt", "GJ_button_01.png", 0.9f
-        );
-        m_speedBtnSpr->setScale(0.9f);
-        auto speedBtn = CCMenuItemSpriteExtra::create(
-            m_speedBtnSpr, this, menu_selector(AstraPopup::onSpeedCycle)
-        );
-        m_buttonMenu->addChildAtPosition(speedBtn, Anchor::Center, ccp(0.f, -10.f));
-
-        // Hint line -----------------------------------------------------------
-        m_hintLabel = CCLabelBMFont::create(
-            "Toggles apply while a level is running", "bigFont.fnt"
-        );
-        m_hintLabel->setScale(0.35f);
-        m_hintLabel->setOpacity(150);
-        m_mainLayer->addChildAtPosition(m_hintLabel, Anchor::Center, ccp(0.f, -58.f));
-
-        return true;
-    }
-
-    void refreshNoclip() {
-        if (m_noclipBtnSpr) {
-            m_noclipBtnSpr->setString(noclipText());
-        }
-    }
-
-    void refreshSpeed() {
-        if (m_speedBtnSpr) {
-            m_speedBtnSpr->setString(
-                fmt::format("Speed: x{}", astra::speedMult()).c_str()
-            );
-        }
-        if (m_hintLabel) {
-            if (std::abs(astra::speedMult() - 1.0f) > 0.001f) {
-                m_hintLabel->setString("Speed is active in levels only");
-            } else {
-                m_hintLabel->setString("Toggles apply while a level is running");
-            }
-        }
-    }
-
-    void onNoclip(CCObject*) {
-        astra::setNoclipOn(!astra::noclipOn());
-        this->refreshNoclip();
-    }
-
-    void onSpeedCycle(CCObject*) {
-        float cur = astra::speedMult();
-        size_t idx = 0;
-        for (size_t i = 0; i < std::size(astra::SPEED_STEPS); ++i) {
-            if (std::abs(astra::SPEED_STEPS[i] - cur) < 0.001f) {
-                idx = i;
-                break;
-            }
-        }
-        size_t next = (idx + 1) % std::size(astra::SPEED_STEPS);
-        astra::setSpeedMult(astra::SPEED_STEPS[next]);
-        this->refreshSpeed();
-    }
-
-public:
-    static AstraPopup* create() {
-        auto ret = new AstraPopup();
-        if (ret->init()) {
-            ret->autorelease();
-            return ret;
-        }
-        delete ret;
-        return nullptr;
-    }
-};
-
-namespace astra {
-
-void openPopup() {
-    if (auto popup = AstraPopup::create()) {
-        popup->show();
-    }
+// Active PlayLayer singleton (for Practice/Restart actions).
+PlayLayer*& activePL() {
+    static PlayLayer* s_pl = nullptr;
+    return s_pl;
 }
 
 // Shared button anchor helper. `owner` is the layer that receives the menu and
@@ -199,6 +101,206 @@ void placeAstraButton(
 
 } // namespace astra
 
+// Overlay menu ----------------------------------------------------------------
+
+class AstraOverlay : public cocos2d::CCLayerColor {
+protected:
+    ButtonSprite* m_noclipSpr = nullptr;
+    ButtonSprite* m_speedSpr = nullptr;
+    ButtonSprite* m_practiceSpr = nullptr;
+    cocos2d::CCMenu* m_menu = nullptr;
+
+    static const char* noclipText() {
+        return astra::noclipOn() ? "Noclip: ON" : "Noclip: OFF";
+    }
+
+    static const char* practiceText() {
+        auto pl = astra::activePL();
+        if (!pl) return "Practice: -";
+        return pl->m_isPracticeMode ? "Practice: ON" : "Practice: OFF";
+    }
+
+    bool init() override {
+        auto win = cocos2d::CCDirector::get()->getWinSize();
+        if (!CCLayerColor::initWithColor(cocos2d::ccc4(0, 0, 0, 150), win.width, win.height)) {
+            return false;
+        }
+        this->setTouchEnabled(true); // triggers registerWithTouchDispatcher on enter
+
+        // Panel ----------------------------------------------------------------
+        auto panel = cocos2d::CCLayerColor::create(cocos2d::ccc4(24, 20, 34, 235), 300.f, 290.f);
+        panel->ignoreAnchorPointForPosition(false);
+        panel->setAnchorPoint({ 0.5f, 0.5f });
+        panel->setPosition({ win.width * 0.5f, win.height * 0.5f });
+        this->addChild(panel, 1, 42);
+
+        auto title = CCLabelBMFont::create("Astra Menu", "bigFont.fnt");
+        title->setScale(0.55f);
+        title->setPosition({ 150.f, 258.f });
+        panel->addChild(title);
+
+        auto hint = CCLabelBMFont::create("TAB toggles this menu", "bigFont.fnt");
+        hint->setScale(0.28f);
+        hint->setOpacity(140);
+        hint->setPosition({ 150.f, 232.f });
+        panel->addChild(hint);
+
+        // Buttons --------------------------------------------------------------
+        m_noclipSpr = ButtonSprite::create(noclipText(), "bigFont.fnt", "GJ_button_05.png", 0.9f);
+        m_noclipSpr->setScale(0.85f);
+        auto noclipBtn = CCMenuItemSpriteExtra::create(
+            m_noclipSpr, this, menu_selector(AstraOverlay::onNoclip)
+        );
+
+        m_speedSpr = ButtonSprite::create(
+            fmt::format("Speed: x{}", astra::speedMult()).c_str(),
+            "bigFont.fnt", "GJ_button_01.png", 0.9f
+        );
+        m_speedSpr->setScale(0.85f);
+        auto speedBtn = CCMenuItemSpriteExtra::create(
+            m_speedSpr, this, menu_selector(AstraOverlay::onSpeedCycle)
+        );
+
+        m_practiceSpr = ButtonSprite::create(practiceText(), "bigFont.fnt", "GJ_button_03.png", 0.9f);
+        m_practiceSpr->setScale(0.85f);
+        auto practiceBtn = CCMenuItemSpriteExtra::create(
+            m_practiceSpr, this, menu_selector(AstraOverlay::onPracticeToggle)
+        );
+
+        auto restartSpr = ButtonSprite::create("Restart", "bigFont.fnt", "GJ_button_04.png", 0.9f);
+        restartSpr->setScale(0.85f);
+        auto restartBtn = CCMenuItemSpriteExtra::create(
+            restartSpr, this, menu_selector(AstraOverlay::onRestart)
+        );
+
+        auto closeSpr = ButtonSprite::create("Close", "bigFont.fnt", "GJ_button_02.png", 0.9f);
+        closeSpr->setScale(0.85f);
+        auto closeBtn = CCMenuItemSpriteExtra::create(
+            closeSpr, this, menu_selector(AstraOverlay::onClose)
+        );
+
+        // The menu covers the panel: coordinates are mechanic-relative to it, so
+        // it must sit at the panel center with the panel's content size.
+        m_menu = cocos2d::CCMenu::create();
+        m_menu->ignoreAnchorPointForPosition(false);
+        m_menu->setContentSize({ 300.f, 290.f });
+        m_menu->setPosition(panel->getPosition());
+        this->addChild(m_menu, 2, 43);
+
+        m_menu->addChildAtPosition(noclipBtn, Anchor::Center, { 0.f, 78.f });
+        m_menu->addChildAtPosition(speedBtn, Anchor::Center, { 0.f, 30.f });
+        m_menu->addChildAtPosition(practiceBtn, Anchor::Center, { 0.f, -18.f });
+        m_menu->addChildAtPosition(restartBtn, Anchor::Center, { -62.f, -68.f });
+        m_menu->addChildAtPosition(closeBtn, Anchor::Center, { 62.f, -68.f });
+
+        return true;
+    }
+
+    // Touch routing mirrors FLAlertLayer's pattern ... but on a plain layer:
+    // registered first (lower priority than menus), swallows everything
+    // outside the panel; inside the panel touches are forwarded to the CCMenu
+    // so buttons keep working and empty panel spots swallow nothing.
+    void registerWithTouchDispatcher() override {
+        cocos2d::CCTouchDispatcher::sharedDispatcher()
+            ->addTargetedDelegate(this, -130, true);
+    }
+
+    bool ccTouchBegan(cocos2d::CCTouch* touch, cocos2d::CCEvent*) override {
+        auto pos = touch->getLocation();
+        if (m_menu && m_menu->boundingBox().containsPoint(pos)) {
+            return false; // let the CCMenu buttons handle panel-internal touches
+        }
+        return true; // swallow gameplay/menus while the menu is open
+    }
+
+    void refreshAll() {
+        if (m_noclipSpr) {
+            m_noclipSpr->setString(noclipText());
+        }
+        if (m_speedSpr) {
+            m_speedSpr->setString(
+                fmt::format("Speed: x{}", astra::speedMult()).c_str()
+            );
+        }
+        if (m_practiceSpr) {
+            m_practiceSpr->setString(practiceText());
+        }
+    }
+
+    void onNoclip(CCObject*) {
+        astra::setNoclipOn(!astra::noclipOn());
+        this->refreshAll();
+    }
+
+    void onSpeedCycle(CCObject*) {
+        float cur = astra::speedMult();
+        size_t idx = 0;
+        for (size_t i = 0; i < std::size(astra::SPEED_STEPS); ++i) {
+            if (std::abs(astra::SPEED_STEPS[i] - cur) < 0.001f) {
+                idx = i;
+                break;
+            }
+        }
+        astra::setSpeedMult(astra::SPEED_STEPS[(idx + 1) % std::size(astra::SPEED_STEPS)]);
+        this->refreshAll();
+    }
+
+    void onPracticeToggle(CCObject*) {
+        if (auto pl = astra::activePL()) {
+            pl->togglePracticeMode(!pl->m_isPracticeMode);
+            this->refreshAll();
+        }
+    }
+
+    void onRestart(CCObject*) {
+        if (auto pl = astra::activePL()) {
+            pl->resetLevel();
+        }
+    }
+
+    void onClose(CCObject*) {
+        astra::toggleOverlay();
+    }
+
+public:
+    static AstraOverlay* create() {
+        auto ret = new AstraOverlay();
+        if (ret->init()) {
+            ret->autorelease();
+            return ret;
+        }
+        delete ret;
+        return nullptr;
+    }
+};
+
+namespace astra {
+
+void toggleOverlay() {
+    auto scene = cocos2d::CCDirector::get()->getRunningScene();
+    if (!scene) return;
+    if (auto old = scene->getChildByID("sk0v.astra-menu/overlay"_s)) {
+        old->removeFromParent();
+        return;
+    }
+    auto overlay = AstraOverlay::create();
+    if (!overlay) return;
+    overlay->setID("sk0v.astra-menu/overlay"_s);
+    scene->addChild(overlay, 9999);
+}
+
+// Edge-detected TAB polling (safe on every frame in levels and pause).
+void pollTabKey() {
+    static bool s_prev = false;
+    bool down = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
+    if (down && !s_prev) {
+        toggleOverlay();
+    }
+    s_prev = down;
+}
+
+} // namespace astra
+
 // Main menu -------------------------------------------------------------------
 
 class $modify(AstraMenuLayer, MenuLayer) {
@@ -215,8 +317,16 @@ class $modify(AstraMenuLayer, MenuLayer) {
         return true;
     }
 
+    void keyDown(cocos2d::enumKeyCodes key, double timestamp) {
+        if (key == cocos2d::KEY_Tab) {
+            astra::toggleOverlay();
+            return;
+        }
+        MenuLayer::keyDown(key, timestamp);
+    }
+
     void onAstra(CCObject* sender) {
-        astra::openPopup();
+        astra::toggleOverlay();
     }
 };
 
@@ -261,7 +371,7 @@ class $modify(AstraPauseLayer, PauseLayer) {
     }
 
     void onAstra(CCObject* sender) {
-        astra::openPopup();
+        astra::toggleOverlay();
     }
 };
 
@@ -270,11 +380,13 @@ class $modify(AstraPauseLayer, PauseLayer) {
 class $modify(AstraPlayLayer, PlayLayer) {
     bool init(GJGameLevel* level, bool dontCreateObjects) {
         astra::levelPaused() = false;
+        astra::activePL() = this;
         return PlayLayer::init(level, dontCreateObjects);
     }
 
     void onExit() {
         astra::levelPaused() = false;
+        astra::activePL() = nullptr;
         PlayLayer::onExit();
     }
 
@@ -291,6 +403,8 @@ class $modify(AstraPlayLayer, PlayLayer) {
 
 class $modify(AstraBaseGameLayer, GJBaseGameLayer) {
     void update(float dt) {
+        astra::pollTabKey(); // TAB opens/closes the menu anywhere mid-level
+
         float speed = astra::speedMult();
         bool active = (speed > 1.001f || speed < 0.999f)
             && typeinfo_cast<PlayLayer*>(this) != nullptr

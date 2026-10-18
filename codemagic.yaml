@@ -224,7 +224,7 @@ workflows:
           cd "$CM_BUILD_DIR/goldenbest-mod"
           # The binary is rebuilt against 2.2091 bindings in this job, so the
           # Windows game-version declaration becomes 2.2091.
-          sed -i 's/"win": "2.2081"/"win": "2.2091"/' mod.json
+          sed -i '' -e 's/"win": "2.2081"/"win": "2.2091"/' mod.json 2>/dev/null || perl -pi -e 's/"win":\s*"2\.2081"/"win": "2.2091"/' mod.json
           echo "--- mod.json gd after retarget ---"
           grep -A5 '"gd"' mod.json
 
